@@ -1,0 +1,17 @@
+[
+    {
+        "timestamp": "2026-07-25T17:15:19.072792",
+        "notice_hash": "51ca4e5ab36fb213ffe85472997c07fd1e1704af03d7a145aa458ecd5eb1f51c",
+        "assigned_category": "Inauthenticity/IP complaint"
+    },
+    {
+        "timestamp": "2026-07-25T17:20:38.711820",
+        "notice_hash": "9289b605ed5030f8171de82f6ba876a190b31aff98092a26fc26301b1e279f99",
+        "assigned_category": "Inauthenticity/IP complaint"
+    },
+    {
+        "timestamp": "2026-07-25T17:26:01.674495",
+        "notice_hash": "2738789c308a221ba654c8aca8412503304a6d9d768bf8e4f9cdc4402eb5c77b",
+        "assigned_category": "Restricted category/listing policy"
+    }
+]
