@@ -1,12 +1,13 @@
 """
 Reinstatly - Amazon POA Builder
 --------------------------------
-MODIFICATION NOTE:
-Swapped the local Ollama backend for Groq's hosted API (langchain-groq using llama-3.3-70b-versatile).
-This enables deployment on Streamlit Community Cloud.
-- Reads API key from st.secrets["GROQ_API_KEY"].
-- Handles Groq rate limit/API errors gracefully.
-- All guardrails, anti-fabrication checks, prompts, and UI flows remain untouched.
+UPDATES:
+1. Added new diagnosis category: 'Verification / Account Integrity (P-4, fraud, or illegal activity flag)'.
+   Highlights underlying identity/linkage risks and advises specialist review.
+2. Added two new intake questions in Step 1:
+   - First time notice vs. repeat occurrence.
+   - Account Health Rating context.
+3. All anti-fabrication guardrails (sanitize_and_check_draft) and Groq API infrastructure remain 100% intact.
 """
 
 import streamlit as st
@@ -30,7 +31,13 @@ DISCLAIMER_TEXT = (
     "professional review for complex cases (IP disputes, related-account issues, or anything involving legal risk)."
 )
 
-# Initialize Groq LLM
+SPECIALIST_WARNING = (
+    "🚨 **Critical Notice for Account Integrity / Verification Suspensions:**\n"
+    "This category often involves P-4 identity checks, video verification, or suspected account linkage/Section 3 flags. "
+    "A written Plan of Action alone frequently fails to resolve these cases unless the underlying identity mismatch or linked account issue is identified and resolved first. "
+    "Strongly consider consulting an account reinstatement specialist or legal counsel before submitting an appeal."
+)
+
 @st.cache_resource
 def get_llm():
     if "GROQ_API_KEY" not in st.secrets:
@@ -151,8 +158,8 @@ def sanitize_and_check_draft(draft_text: str, combined_user_inputs: str) -> tupl
 # LLM CALLS
 # ==========================================
 
-def run_diagnosis(notice_text: str, seller_type: str, user_cause: str, user_actions: str):
-    """LLM Call #1: Diagnoseert de schorsing via Groq."""
+def run_diagnosis(notice_text: str, seller_type: str, user_cause: str, user_actions: str, occurrence: str, account_health: str):
+    """LLM Call #1: Diagnoseert de schorsing inclusief de nieuwe categorie & intake context."""
     llm = get_llm()
     if not llm:
         return None
@@ -162,19 +169,30 @@ def run_diagnosis(notice_text: str, seller_type: str, user_cause: str, user_acti
         "STRICT RULE: ONLY classify the root cause based on the literal text of the notice provided. "
         "Never assume facts, dates, product categories, or history not explicitly stated by the user.\n\n"
         "Allowed Categories:\n"
-        "- Inauthenticity/IP complaint\n"
-        "- Order Defect Rate / performance metrics\n"
-        "- Related account\n"
-        "- Restricted category/listing policy\n"
-        "- Review manipulation\n"
-        "- Other/Unclear\n\n"
+        "1. Verification / Account Integrity (P-4, fraud, or illegal activity flag)\n"
+        "   - Use when notice mentions 'deceptive, fraudulent, or illegal activity', 'unable to verify', 'P-4', "
+        "'video verification', 'identity verification', or 'Section 3' combined with fraud/illegal language.\n"
+        "   - ROUTING RULE: If 'Section 3' or policy language is combined with Intellectual Property or Rights Owner complaints, route to 'Inauthenticity/IP complaint' instead.\n"
+        "2. Inauthenticity/IP complaint\n"
+        "3. Order Defect Rate / performance metrics\n"
+        "4. Related account\n"
+        "5. Restricted category/listing policy\n"
+        "6. Review manipulation\n"
+        "7. Other/Unclear\n\n"
         "If the notice text does not clearly indicate a category, output 'Unclear — recommend the seller re-read their notice for the specific policy section cited'.\n\n"
         "Output Format:\n"
         "Category: [Selected Category]\n"
         "Explanation: [2-3 sentence plain-English explanation quoting ONLY phrases from the notice text]."
     )
     
-    user_message = f"Notice Text:\n{notice_text}\n\nSeller Type: {seller_type}\nUser Supposed Cause: {user_cause}\nActions Taken: {user_actions}"
+    user_message = (
+        f"Notice Text:\n{notice_text}\n\n"
+        f"Seller Type: {seller_type}\n"
+        f"Occurrence History: {occurrence}\n"
+        f"Account Health Rating: {account_health if account_health else 'Not provided'}\n"
+        f"User Supposed Cause: {user_cause if user_cause else 'None provided'}\n"
+        f"Actions Taken: {user_actions if user_actions else 'None provided'}"
+    )
     
     prompt = ChatPromptTemplate.from_messages([
         ("system", system_prompt),
@@ -194,15 +212,15 @@ def run_diagnosis(notice_text: str, seller_type: str, user_cause: str, user_acti
             st.error("⚠️ An error occurred while contacting the AI service. Please try again later.")
         return None
 
-def run_poa_generation(notice_text: str, seller_type: str, user_cause: str, user_actions: str, diagnosis: str):
-    """LLM Call #2: Genereert het Plan of Action via Groq."""
+def run_poa_generation(notice_text: str, seller_type: str, user_cause: str, user_actions: str, occurrence: str, account_health: str, diagnosis: str):
+    """LLM Call #2: Genereert het Plan of Action met inachtneming van alle intakegegevens."""
     llm = get_llm()
     if not llm:
         return None
     
     system_prompt = (
         "You are a strict Amazon Appeal Drafting Assistant.\n\n"
-        "ABSUTE REQUIREMENT - ZERO NARRATIVE FABRICATION:\n"
+        "ABSOLUTE REQUIREMENT - ZERO NARRATIVE FABRICATION:\n"
         "- You must NEVER invent or assume story details, sourcing methods (e.g., 'liquidation website', 'retail arbitrage'), "
         "supplier names, unit counts (e.g., '15 units'), dates, or brand enforcement habits unless explicitly provided in the input.\n"
         "- If a fact is missing, DO NOT make up a plausible narrative. Leave a bracketed placeholder instead, such as "
@@ -219,6 +237,8 @@ def run_poa_generation(notice_text: str, seller_type: str, user_cause: str, user
     user_message = (
         f"Notice Text: {notice_text}\n"
         f"Seller Type: {seller_type}\n"
+        f"Occurrence: {occurrence}\n"
+        f"Account Health: {account_health if account_health else 'Not specified'}\n"
         f"Perceived Cause: {user_cause if user_cause else 'None provided'}\n"
         f"Actions Already Taken: {user_actions if user_actions else 'None provided'}\n"
         f"Confirmed Diagnosis: {diagnosis}"
@@ -252,7 +272,6 @@ def main():
     st.title("📦 Reinstatly")
     st.caption("Privacy-First Amazon Suspension Plan of Action (POA) Generator")
     
-    # Check GROQ API Key Startup Guardrail
     if "GROQ_API_KEY" not in st.secrets or not st.secrets["GROQ_API_KEY"]:
         st.error("❌ **GROQ_API_KEY not configured.** Please add your Groq API key to Streamlit secrets.")
         st.stop()
@@ -286,6 +305,17 @@ def main():
         "What type of seller are you?",
         ["Private label", "Wholesale", "Retail arbitrage", "Dropshipping", "Other"]
     )
+
+    # NIEUWE INTAKE VRAGEN
+    occurrence = st.selectbox(
+        "Is this the first time you've received this type of notice, or has it happened before?",
+        ["First time", "Happened before", "Not sure"]
+    )
+
+    account_health = st.text_input(
+        "Do you know your Account Health rating at the time of this notice? (optional)",
+        placeholder="e.g. 200, Good, At Risk, or Not sure"
+    )
     
     user_cause = st.text_input("In your own words, what do you think caused this? (optional)")
     user_actions = st.text_area("What corrective actions, if any, have you already taken? (optional)")
@@ -297,7 +327,9 @@ def main():
             st.warning("⚠️ Non-English text detected. Reinstatly currently only supports English suspension notices.")
         else:
             with st.spinner("Analyzing notice with AI..."):
-                diag_result = run_diagnosis(notice_text, seller_type, user_cause, user_actions)
+                diag_result = run_diagnosis(
+                    notice_text, seller_type, user_cause, user_actions, occurrence, account_health
+                )
                 if diag_result:
                     st.session_state.diagnosis = diag_result
                     st.session_state.step = 2
@@ -318,6 +350,10 @@ def main():
         st.subheader("AI Analysis Result:")
         st.write(st.session_state.diagnosis)
         
+        # Specifieke waarschuwing tonen indien Verification / Account Integrity gedetecteerd is
+        if "Verification / Account Integrity" in st.session_state.diagnosis:
+            st.warning(SPECIALIST_WARNING)
+
         st.write("---")
         st.write("**Does this diagnosis match your situation?**")
         
@@ -342,17 +378,20 @@ def main():
         st.divider()
         st.header("Step 3: Plan of Action Draft")
         
+        if "Verification / Account Integrity" in st.session_state.diagnosis:
+            st.error(SPECIALIST_WARNING)
+
         if not st.session_state.diagnosis_confirmed:
             st.warning("Please confirm the diagnosis in Step 2 before generating the draft.")
         else:
             if not st.session_state.poa_draft:
                 with st.spinner("Generating structured Plan of Action..."):
                     raw_draft = run_poa_generation(
-                        notice_text, seller_type, user_cause, user_actions, st.session_state.diagnosis
+                        notice_text, seller_type, user_cause, user_actions, occurrence, account_health, st.session_state.diagnosis
                     )
                     
                     if raw_draft:
-                        combined_inputs = f"{notice_text} {user_cause} {user_actions}"
+                        combined_inputs = f"{notice_text} {user_cause} {user_actions} {occurrence} {account_health}"
                         clean_draft, replacements_made = sanitize_and_check_draft(raw_draft, combined_inputs)
                         
                         st.session_state.poa_draft = clean_draft
