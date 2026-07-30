@@ -2,12 +2,10 @@
 Reinstatly - Amazon POA Builder
 --------------------------------
 UPDATES:
-1. Added new diagnosis category: 'Verification / Account Integrity (P-4, fraud, or illegal activity flag)'.
-   Highlights underlying identity/linkage risks and advises specialist review.
-2. Added two new intake questions in Step 1:
-   - First time notice vs. repeat occurrence.
-   - Account Health Rating context.
-3. All anti-fabrication guardrails (sanitize_and_check_draft) and Groq API infrastructure remain 100% intact.
+1. Updated Step 3 LLM Prompt (run_poa_generation):
+   - Added explicit instruction to scan ALL input fields (including 'Perceived Cause') for actions already taken.
+   - Prevents real, user-provided facts from being wrongly converted into placeholders in Section 2.
+2. Improved language detection (is_english) with word boundaries to prevent false positives on names (e.g., Yiğit).
 """
 
 import streamlit as st
@@ -60,20 +58,17 @@ def is_english(text: str) -> bool:
     """
     text_lower = text.lower()
     
-    # Exclusieve niet-Engelse stopwoorden (met regex boundary \b om te voorkomen dat namen triggeren)
     non_english_patterns = [
         r'\bhet\b', r'\bhetzelf\b', r'\bactieplan\b', r'\bgeschorst\b', 
         r'\bbeste\b', r'\bverkoper\b', r'\bbeleid\b', r'\bgelieve\b', 
         r'\bingediend\b', r'\bnicht\b', r'\bvotre\b', r'\bcompte\b'
     ]
     
-    # Tel hoeveel specifieke niet-Engelse woorden erin staan
     matches = 0
     for pattern in non_english_patterns:
         if re.search(pattern, text_lower):
             matches += 1
             
-    # Alleen blokkeren als er 2 of meer duidelijke niet-Engelse stopwoorden zijn
     if matches >= 2:
         return False
         
@@ -176,7 +171,7 @@ def sanitize_and_check_draft(draft_text: str, combined_user_inputs: str) -> tupl
 # ==========================================
 
 def run_diagnosis(notice_text: str, seller_type: str, user_cause: str, user_actions: str, occurrence: str, account_health: str):
-    """LLM Call #1: Diagnoseert de schorsing inclusief de nieuwe categorie & intake context."""
+    """LLM Call #1: Diagnoseert de schorsing."""
     llm = get_llm()
     if not llm:
         return None
@@ -230,13 +225,17 @@ def run_diagnosis(notice_text: str, seller_type: str, user_cause: str, user_acti
         return None
 
 def run_poa_generation(notice_text: str, seller_type: str, user_cause: str, user_actions: str, occurrence: str, account_health: str, diagnosis: str):
-    """LLM Call #2: Genereert het Plan of Action met inachtneming van alle intakegegevens."""
+    """LLM Call #2: Genereert het Plan of Action met inachtneming van alle intakegegevens en strikte feitencontrole."""
     llm = get_llm()
     if not llm:
         return None
     
     system_prompt = (
         "You are a strict Amazon Appeal Drafting Assistant.\n\n"
+        "INTEGRATION OF USER FACTS:\n"
+        "- Before drafting Section 2 (Immediate Corrective Actions Taken), review ALL user-provided fields — including 'Perceived Cause' and 'Actions Already Taken' — for anything the seller has stated they already did (e.g., completed a verification step, submitted documents, removed a listing).\n"
+        "- These real, user-confirmed actions MUST be included as specific, factual statements in Section 2, not replaced with placeholders.\n"
+        "- Only use bracketed placeholders for information the user did NOT provide anywhere in their input — never for facts they explicitly stated, regardless of which intake field they were entered into.\n\n"
         "ABSOLUTE REQUIREMENT - ZERO NARRATIVE FABRICATION:\n"
         "- You must NEVER invent or assume story details, sourcing methods (e.g., 'liquidation website', 'retail arbitrage'), "
         "supplier names, unit counts (e.g., '15 units'), dates, or brand enforcement habits unless explicitly provided in the input.\n"
@@ -323,7 +322,6 @@ def main():
         ["Private label", "Wholesale", "Retail arbitrage", "Dropshipping", "Other"]
     )
 
-    # NIEUWE INTAKE VRAGEN
     occurrence = st.selectbox(
         "Is this the first time you've received this type of notice, or has it happened before?",
         ["First time", "Happened before", "Not sure"]
@@ -367,7 +365,6 @@ def main():
         st.subheader("AI Analysis Result:")
         st.write(st.session_state.diagnosis)
         
-        # Specifieke waarschuwing tonen indien Verification / Account Integrity gedetecteerd is
         if "Verification / Account Integrity" in st.session_state.diagnosis:
             st.warning(SPECIALIST_WARNING)
 
