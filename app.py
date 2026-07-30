@@ -54,13 +54,28 @@ def get_llm():
 # ==========================================
 
 def is_english(text: str) -> bool:
-    """Basis taaldetectie op basis van ASCII-verhouding."""
-    try:
-        text.encode('ascii')
-        return True
-    except UnicodeEncodeError:
-        non_ascii = len([char for char in text if ord(char) > 128])
-        return (non_ascii / len(text)) < 0.15
+    """
+    Controleert of de tekst voornamelijk Engels is door te checken op
+    veelvoorkomende niet-Engelse (o.a. Nederlandse/Duitse/Franse) stopwoorden.
+    """
+    text_lower = text.lower()
+    
+    # Veelvoorkomende niet-Engelse woorden in suspension notices
+    non_english_words = [
+        " het ", " de ", " een ", " van ", " het ", " uw ", " is ", " niet ", 
+        " actieplan ", " geschorst ", " beste ", " verkoper ", " beleid ",
+        " account ", " gelieve ", " ingediend ", " wird ", " nicht ", " wurde ",
+        " votre ", " compte ", " suspendu "
+    ]
+    
+    # Tel hoeveel niet-Engelse stopwoorden in de tekst voorkomen
+    matches = sum(1 for word in non_english_words if word in text_lower)
+    
+    # Als er 2 of meer niet-Engelse stopwoorden zijn gevonden, is het geen Engels
+    if matches >= 2:
+        return False
+        
+    return True
 
 def log_session(notice_text: str, category: str):
     """Slaat geanonimiseerde sessielogs op."""
