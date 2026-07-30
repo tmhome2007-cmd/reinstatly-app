@@ -56,22 +56,24 @@ def get_llm():
 def is_english(text: str) -> bool:
     """
     Controleert of de tekst voornamelijk Engels is door te checken op
-    veelvoorkomende niet-Engelse (o.a. Nederlandse/Duitse/Franse) stopwoorden.
+    exclusieve niet-Engelse stopwoorden (volledige woorden).
     """
     text_lower = text.lower()
     
-    # Veelvoorkomende niet-Engelse woorden in suspension notices
-    non_english_words = [
-        " het ", " de ", " een ", " van ", " het ", " uw ", " is ", " niet ", 
-        " actieplan ", " geschorst ", " beste ", " verkoper ", " beleid ",
-        " account ", " gelieve ", " ingediend ", " wird ", " nicht ", " wurde ",
-        " votre ", " compte ", " suspendu "
+    # Exclusieve niet-Engelse stopwoorden (met regex boundary \b om te voorkomen dat namen triggeren)
+    non_english_patterns = [
+        r'\bhet\b', r'\bhetzelf\b', r'\bactieplan\b', r'\bgeschorst\b', 
+        r'\bbeste\b', r'\bverkoper\b', r'\bbeleid\b', r'\bgelieve\b', 
+        r'\bingediend\b', r'\bnicht\b', r'\bvotre\b', r'\bcompte\b'
     ]
     
-    # Tel hoeveel niet-Engelse stopwoorden in de tekst voorkomen
-    matches = sum(1 for word in non_english_words if word in text_lower)
-    
-    # Als er 2 of meer niet-Engelse stopwoorden zijn gevonden, is het geen Engels
+    # Tel hoeveel specifieke niet-Engelse woorden erin staan
+    matches = 0
+    for pattern in non_english_patterns:
+        if re.search(pattern, text_lower):
+            matches += 1
+            
+    # Alleen blokkeren als er 2 of meer duidelijke niet-Engelse stopwoorden zijn
     if matches >= 2:
         return False
         
