@@ -1,11 +1,12 @@
 """
 Reinstatly - Amazon POA Builder
 --------------------------------
-UPDATES:
-1. Added 'Final Decision / Closed Appeal Channel' detection layer in run_diagnosis (LLM Call #1).
-2. Added dedicated warning banner for closed appeal channels.
-3. Updated run_poa_generation (LLM Call #2) to frame Section 1 around NEW evidence and avoid false hope in Sections 2/3 when a final decision is flagged.
-4. Preserved all anti-fabrication rules, language checks, and Verification/Account Integrity logic.
+FEATURES:
+1. Strict zero-fabrication guardrails with automatic placeholder sanitation.
+2. Verification / Account Integrity category detection with specialist warnings.
+3. Closed Appeal Channel / Final Decision detection layer with warning banners.
+4. Robust English language detection using word boundaries (prevents false flags on names).
+5. Comprehensive integration of user-provided facts across all input fields.
 """
 
 import streamlit as st
@@ -63,7 +64,7 @@ def get_llm():
 def is_english(text: str) -> bool:
     """
     Controleert of de tekst voornamelijk Engels is door te checken op
-    exclusieve niet-Engelse stopwoorden (volledige woorden).
+    exclusieve niet-Engelse stopwoorden (volledige woorden met word boundaries).
     """
     text_lower = text.lower()
     
@@ -385,7 +386,7 @@ def main():
                     is_final = bool(re.search(r'Final Decision Flag:\s*Yes', diag_result, re.IGNORECASE))
                     st.session_state.is_final_decision = is_final
 
-                    cat_match = re.search(r'Category:\s*(.*)', diag_result)
+                    cat_match = re.search(r'Category:\s*(.*?)(?=\n|$)', diag_result)
                     category_found = cat_match.group(1) if cat_match else "Unclear"
                     log_session(notice_text, category_found, is_final)
                     st.rerun()
