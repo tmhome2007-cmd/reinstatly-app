@@ -2,10 +2,10 @@
 Reinstatly - Amazon POA Builder
 --------------------------------
 UPDATES:
-1. Updated Step 3 LLM Prompt (run_poa_generation):
-   - Added explicit instruction to scan ALL input fields (including 'Perceived Cause') for actions already taken.
-   - Prevents real, user-provided facts from being wrongly converted into placeholders in Section 2.
-2. Improved language detection (is_english) with word boundaries to prevent false positives on names (e.g., Yiğit).
+1. Added 'Final Decision / Closed Appeal Channel' detection layer in run_diagnosis (LLM Call #1).
+2. Added dedicated warning banner for closed appeal channels.
+3. Updated run_poa_generation (LLM Call #2) to frame Section 1 around NEW evidence and avoid false hope in Sections 2/3 when a final decision is flagged.
+4. Preserved all anti-fabrication rules, language checks, and Verification/Account Integrity logic.
 """
 
 import streamlit as st
@@ -34,6 +34,15 @@ SPECIALIST_WARNING = (
     "This category often involves P-4 identity checks, video verification, or suspected account linkage/Section 3 flags. "
     "A written Plan of Action alone frequently fails to resolve these cases unless the underlying identity mismatch or linked account issue is identified and resolved first. "
     "Strongly consider consulting an account reinstatement specialist or legal counsel before submitting an appeal."
+)
+
+FINAL_DECISION_WARNING = (
+    "⚠️ **This notice indicates Amazon has closed this specific appeal channel.**\n"
+    "Language like 'final decision' or 'unlikely to change the outcome' means a standard resubmission is unlikely to be reviewed. "
+    "If you have NEW evidence not previously submitted, emphasize what is specifically new. "
+    "Otherwise, realistic next steps typically include: escalating through Account Health Support and explicitly requesting manual review, "
+    "consulting a specialist about arbitration or legal options, or accepting this outcome. "
+    "A generic Plan of Action alone is unlikely to reopen a case Amazon has explicitly closed."
 )
 
 @st.cache_resource
@@ -74,13 +83,14 @@ def is_english(text: str) -> bool:
         
     return True
 
-def log_session(notice_text: str, category: str):
+def log_session(notice_text: str, category: str, is_final: bool):
     """Slaat geanonimiseerde sessielogs op."""
     notice_hash = hashlib.sha256(notice_text.encode('utf-8')).hexdigest()
     log_entry = {
         "timestamp": datetime.now().isoformat(),
         "notice_hash": notice_hash,
-        "assigned_category": category
+        "assigned_category": category,
+        "is_final_decision": is_final
     }
     
     try:
@@ -171,7 +181,7 @@ def sanitize_and_check_draft(draft_text: str, combined_user_inputs: str) -> tupl
 # ==========================================
 
 def run_diagnosis(notice_text: str, seller_type: str, user_cause: str, user_actions: str, occurrence: str, account_health: str):
-    """LLM Call #1: Diagnoseert de schorsing."""
+    """LLM Call #1: Diagnoseert de schorsing en detecteert of het een Final Decision betreft."""
     llm = get_llm()
     if not llm:
         return None
@@ -191,9 +201,16 @@ def run_diagnosis(notice_text: str, seller_type: str, user_cause: str, user_acti
         "5. Restricted category/listing policy\n"
         "6. Review manipulation\n"
         "7. Other/Unclear\n\n"
-        "If the notice text does not clearly indicate a category, output 'Unclear — recommend the seller re-read their notice for the specific policy section cited'.\n\n"
-        "Output Format:\n"
+        "FINAL DECISION DETECTION:\n"
+        "Check if the notice contains language indicating Amazon has closed the appeal channel or reached a final decision, such as:\n"
+        "- 'final decision'\n"
+        "- 'unlikely to change the outcome'\n"
+        "- 'may not respond to further emails'\n"
+        "- 'evaluation of your account is complete'\n"
+        "- 'will not be reactivated' (without next-step appeal instructions)\n\n"
+        "Output Format EXACTLY as follows:\n"
         "Category: [Selected Category]\n"
+        "Final Decision Flag: [Yes or No]\n"
         "Explanation: [2-3 sentence plain-English explanation quoting ONLY phrases from the notice text]."
     )
     
@@ -224,18 +241,29 @@ def run_diagnosis(notice_text: str, seller_type: str, user_cause: str, user_acti
             st.error("⚠️ An error occurred while contacting the AI service. Please try again later.")
         return None
 
-def run_poa_generation(notice_text: str, seller_type: str, user_cause: str, user_actions: str, occurrence: str, account_health: str, diagnosis: str):
-    """LLM Call #2: Genereert het Plan of Action met inachtneming van alle intakegegevens en strikte feitencontrole."""
+def run_poa_generation(notice_text: str, seller_type: str, user_cause: str, user_actions: str, occurrence: str, account_health: str, diagnosis: str, is_final_decision: bool):
+    """LLM Call #2: Genereert het Plan of Action met aangepaste framing als Final Decision Flag actief is."""
     llm = get_llm()
     if not llm:
         return None
+    
+    final_decision_instruction = ""
+    if is_final_decision:
+        final_decision_instruction = (
+            "\nCRITICAL TONAL SHIFT - CLOSED APPEAL CHANNEL:\n"
+            "- The notice indicates Amazon has issued a final decision or closed the standard appeal channel.\n"
+            "- In Section 1 (Root Cause), explicitly frame the analysis around what, if anything, is genuinely NEW or previously unsubmitted evidence.\n"
+            "- In Sections 2 and 3, DO NOT use generic forward-looking language that implies a routine appeal will be reviewed. "
+            "Focus strictly on concrete, newly provided facts or specific procedural escalations.\n"
+        )
     
     system_prompt = (
         "You are a strict Amazon Appeal Drafting Assistant.\n\n"
         "INTEGRATION OF USER FACTS:\n"
         "- Before drafting Section 2 (Immediate Corrective Actions Taken), review ALL user-provided fields — including 'Perceived Cause' and 'Actions Already Taken' — for anything the seller has stated they already did (e.g., completed a verification step, submitted documents, removed a listing).\n"
         "- These real, user-confirmed actions MUST be included as specific, factual statements in Section 2, not replaced with placeholders.\n"
-        "- Only use bracketed placeholders for information the user did NOT provide anywhere in their input — never for facts they explicitly stated, regardless of which intake field they were entered into.\n\n"
+        "- Only use bracketed placeholders for information the user did NOT provide anywhere in their input — never for facts they explicitly stated, regardless of which intake field they were entered into.\n"
+        f"{final_decision_instruction}\n"
         "ABSOLUTE REQUIREMENT - ZERO NARRATIVE FABRICATION:\n"
         "- You must NEVER invent or assume story details, sourcing methods (e.g., 'liquidation website', 'retail arbitrage'), "
         "supplier names, unit counts (e.g., '15 units'), dates, or brand enforcement habits unless explicitly provided in the input.\n"
@@ -257,7 +285,8 @@ def run_poa_generation(notice_text: str, seller_type: str, user_cause: str, user
         f"Account Health: {account_health if account_health else 'Not specified'}\n"
         f"Perceived Cause: {user_cause if user_cause else 'None provided'}\n"
         f"Actions Already Taken: {user_actions if user_actions else 'None provided'}\n"
-        f"Confirmed Diagnosis: {diagnosis}"
+        f"Confirmed Diagnosis: {diagnosis}\n"
+        f"Is Final Decision: {'Yes' if is_final_decision else 'No'}"
     )
     
     prompt = ChatPromptTemplate.from_messages([
@@ -299,6 +328,8 @@ def main():
         st.session_state.step = 1
     if "diagnosis" not in st.session_state:
         st.session_state.diagnosis = None
+    if "is_final_decision" not in st.session_state:
+        st.session_state.is_final_decision = False
     if "diagnosis_confirmed" not in st.session_state:
         st.session_state.diagnosis_confirmed = False
     if "poa_draft" not in st.session_state:
@@ -350,9 +381,13 @@ def main():
                     st.session_state.step = 2
                     st.session_state.diagnosis_confirmed = False
                     
+                    # Check for Final Decision Flag in output
+                    is_final = bool(re.search(r'Final Decision Flag:\s*Yes', diag_result, re.IGNORECASE))
+                    st.session_state.is_final_decision = is_final
+
                     cat_match = re.search(r'Category:\s*(.*)', diag_result)
                     category_found = cat_match.group(1) if cat_match else "Unclear"
-                    log_session(notice_text, category_found)
+                    log_session(notice_text, category_found, is_final)
                     st.rerun()
 
     # --------------------------------------------------
@@ -365,6 +400,10 @@ def main():
         st.subheader("AI Analysis Result:")
         st.write(st.session_state.diagnosis)
         
+        # Specifieke waarschuwingen tonen
+        if st.session_state.is_final_decision:
+            st.warning(FINAL_DECISION_WARNING)
+
         if "Verification / Account Integrity" in st.session_state.diagnosis:
             st.warning(SPECIALIST_WARNING)
 
@@ -392,6 +431,9 @@ def main():
         st.divider()
         st.header("Step 3: Plan of Action Draft")
         
+        if st.session_state.is_final_decision:
+            st.warning(FINAL_DECISION_WARNING)
+
         if "Verification / Account Integrity" in st.session_state.diagnosis:
             st.error(SPECIALIST_WARNING)
 
@@ -401,7 +443,8 @@ def main():
             if not st.session_state.poa_draft:
                 with st.spinner("Generating structured Plan of Action..."):
                     raw_draft = run_poa_generation(
-                        notice_text, seller_type, user_cause, user_actions, occurrence, account_health, st.session_state.diagnosis
+                        notice_text, seller_type, user_cause, user_actions, occurrence, account_health, 
+                        st.session_state.diagnosis, st.session_state.is_final_decision
                     )
                     
                     if raw_draft:
