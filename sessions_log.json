@@ -13,5 +13,17 @@
         "timestamp": "2026-07-25T17:26:01.674495",
         "notice_hash": "2738789c308a221ba654c8aca8412503304a6d9d768bf8e4f9cdc4402eb5c77b",
         "assigned_category": "Restricted category/listing policy"
+    },
+    {
+        "timestamp": "2026-08-31T16:07:01.417382",
+        "notice_hash": "ff9a0f90fa4bda768f9bccce25e19b5bd61d8e757ac7a702a10c67906960d664",
+        "assigned_category": "Verification / Account Integrity",
+        "is_final_decision": true
+    },
+    {
+        "timestamp": "2026-08-31T16:13:31.376847",
+        "notice_hash": "ccab8a2a8e0e88f19005891de5c98d37024760fcc7edbf9e4ba9e6d069345ab6",
+        "assigned_category": "1. Verification / Account Integrity  ",
+        "is_final_decision": true
     }
 ]
