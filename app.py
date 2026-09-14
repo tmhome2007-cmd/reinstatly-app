@@ -9,6 +9,8 @@ FEATURES:
 5. Robust English language detection using word boundaries.
 6. Comprehensive integration of user-provided facts across all input fields.
 7. Dynamic active model fetching to handle Groq API deprecations smoothly.
+8. Extended Session Logging & Debug view with full content inspection and log clearing.
+9. Permanent Beta privacy note on the main user interface.
 """
 
 import streamlit as st
@@ -51,6 +53,11 @@ FINAL_DECISION_WARNING = (
     "A generic Plan of Action alone is unlikely to reopen a case Amazon has explicitly closed."
 )
 
+BETA_PRIVACY_NOTE = (
+    "ℹ️ **Beta Notice:** This tool is currently in beta. Session data may be reviewed by the "
+    "developer to improve accuracy. Do not paste information you're not comfortable being reviewed."
+)
+
 @st.cache_resource
 def get_working_model_name():
     """Haalt de actieve modellijst op bij Groq en kiest een beschikbaar model."""
@@ -61,7 +68,6 @@ def get_working_model_name():
         models_list = client.models.list()
         available_models = [m.id for m in models_list.data]
         
-        # Probeer eerst een GPT-OSS, Qwen of Llama model te selecteren
         for model in available_models:
             if any(k in model.lower() for k in ["gpt-oss", "qwen", "llama"]):
                 return model
@@ -95,7 +101,7 @@ def get_llm(model_override=None):
 def render_debug_view():
     """Toont een verborgen debug-dashboard als de juiste URL-parameter is meegegeven."""
     if st.query_params.get("debug") == DEBUG_SECRET_TOKEN:
-        st.title("🛠️ Developer Debug View - Sessions Log")
+        st.title("🛠️ Developer Debug View - Extended Sessions Log")
         st.warning("Je bevindt je in de afgeschermde ontwikkelaarsomgeving.")
         
         try:
@@ -104,26 +110,8 @@ def render_debug_view():
                 
             if logs:
                 st.metric(label="Totaal aantal gelogde sessies", value=len(logs))
-                df = pd.DataFrame(logs)
                 
-                expected_columns = {
-                    "timestamp": "Onbekend",
-                    "assigned_category": "Unclear",
-                    "is_final_decision": False,
-                    "notice_hash": "N/A"
-                }
-                
-                for col, default_val in expected_columns.items():
-                    if col not in df.columns:
-                        df[col] = default_val
-                
-                df.fillna(value=expected_columns, inplace=True)
-                
-                df_display = df[["timestamp", "assigned_category", "is_final_decision", "notice_hash"]].copy()
-                df_display.columns = ["Tijdstip", "Categorie", "Final Decision", "Notice Hash"]
-                
-                st.dataframe(df_display, use_container_width=True)
-                
+                # Exporteer / Downloadoptie
                 json_string = json.dumps(logs, indent=4)
                 st.download_button(
                     label="📥 Download sessions_log.json",
@@ -131,6 +119,29 @@ def render_debug_view():
                     file_name="sessions_log.json",
                     mime="application/json"
                 )
+                
+                st.write("---")
+                st.subheader("Gedetailleerde Sessie-inspectie")
+                
+                # Toon elke sessie als een uitvouwbaar element (expander)
+                for index, entry in enumerate(reversed(logs)):
+                    timestamp = entry.get("timestamp", "Onbekend tijdstip")
+                    category = entry.get("assigned_category", "Onbekend")
+                    
+                    with st.expander(f"Sessie {len(logs) - index}: {timestamp} | Categorie: {category}"):
+                        st.json(entry)
+
+                st.divider()
+                st.subheader("🗑️ Logs Opschonen")
+                confirm_delete = st.checkbox("Ik bevestig dat ik alle opgeslagen logs definitief wil wissen.")
+                if st.button("Clear all logs", type="primary"):
+                    if confirm_delete:
+                        with open(LOG_FILE, "w") as f:
+                            json.dump([], f)
+                        st.success("Alle logs zijn succesvol gewist!")
+                        st.rerun()
+                    else:
+                        st.error("Vink eerst het bevestigingsvakje aan om de logs te wissen.")
             else:
                 st.info("Het bestand `sessions_log.json` is nog leeg.")
                 
@@ -156,14 +167,33 @@ def is_english(text: str) -> bool:
     matches = sum(1 for pattern in non_english_patterns if re.search(pattern, text_lower))
     return matches < 2
 
-def log_session(notice_text: str, category: str, is_final: bool):
-    """Slaat geanonimiseerde sessielogs op."""
+def log_session(
+    notice_text: str, 
+    category: str, 
+    is_final: bool,
+    seller_type: str = "",
+    occurrence: str = "",
+    account_health: str = "",
+    user_cause: str = "",
+    user_actions: str = "",
+    diagnosis_output: str = "",
+    poa_draft: str = ""
+):
+    """Slaat volledige sessielogs op voor beta-beoordeling."""
     notice_hash = hashlib.sha256(notice_text.encode('utf-8')).hexdigest()
     log_entry = {
         "timestamp": datetime.now().isoformat(),
         "notice_hash": notice_hash,
         "assigned_category": category,
-        "is_final_decision": is_final
+        "is_final_decision": is_final,
+        "notice_text": notice_text,
+        "seller_type": seller_type,
+        "occurrence": occurrence,
+        "account_health": account_health,
+        "user_cause": user_cause,
+        "user_actions": user_actions,
+        "diagnosis_output": diagnosis_output,
+        "poa_draft": poa_draft
     }
     
     try:
@@ -409,10 +439,6 @@ def main():
                     
                     is_final = bool(re.search(r'Final Decision Flag:\s*Yes', diag_result, re.IGNORECASE))
                     st.session_state.is_final_decision = is_final
-
-                    cat_match = re.search(r'Category:\s*(.*?)(?=\n|$)', diag_result)
-                    category_found = cat_match.group(1) if cat_match else "Unclear"
-                    log_session(notice_text, category_found, is_final)
                     st.rerun()
 
     # STEP 2: ROOT CAUSE DIAGNOSIS
@@ -474,6 +500,23 @@ def main():
                         st.session_state.poa_draft = clean_draft
                         st.session_state.replacements_were_made = replacements_made
 
+                        # Log de volledige sessies nu het POA-concept is voltooid
+                        cat_match = re.search(r'Category:\s*(.*?)(?=\n|$)', st.session_state.diagnosis)
+                        category_found = cat_match.group(1) if cat_match else "Unclear"
+                        
+                        log_session(
+                            notice_text=notice_text,
+                            category=category_found,
+                            is_final=st.session_state.is_final_decision,
+                            seller_type=seller_type,
+                            occurrence=occurrence,
+                            account_health=account_health,
+                            user_cause=user_cause,
+                            user_actions=user_actions,
+                            diagnosis_output=st.session_state.diagnosis,
+                            poa_draft=clean_draft
+                        )
+
             if st.session_state.poa_draft:
                 if st.session_state.replacements_were_made:
                     st.warning(
@@ -492,6 +535,7 @@ def main():
 
     st.divider()
     st.caption(DISCLAIMER_TEXT)
+    st.caption(BETA_PRIVACY_NOTE)
 
 if __name__ == "__main__":
     main()
