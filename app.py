@@ -2,7 +2,7 @@
 Reinstatly - Amazon POA Builder
 --------------------------------
 FEATURES:
-1. Developer Debug View (accessible via secret URL query param).
+1. Developer Debug View (accessible ONLY via secret URL query param matching st.secrets["DEBUG_TOKEN"]).
 2. Strict zero-fabrication guardrails with automatic placeholder sanitation.
 3. Verification / Account Integrity category detection with specialist warnings.
 4. Closed Appeal Channel / Final Decision detection layer with warning banners.
@@ -11,6 +11,10 @@ FEATURES:
 7. Dynamic active model fetching to handle Groq API deprecations smoothly.
 8. Extended Session Logging & Debug view with full content inspection and log clearing.
 9. Permanent Beta privacy note on the main user interface.
+
+NOTE ON LOGGING & PRIVACY:
+sessions_log.json is written only to Streamlit Cloud's local ephemeral server filesystem.
+It MUST NEVER be committed to Git or pushed to a public repository!
 """
 
 import streamlit as st
@@ -29,7 +33,6 @@ from langchain_core.prompts import ChatPromptTemplate
 FALLBACK_MODEL_NAME = "openai/gpt-oss-120b"
 TEMPERATURE = 0.2
 LOG_FILE = "sessions_log.json"
-DEBUG_SECRET_TOKEN = "MijnGeheimeSleutel123"
 
 DISCLAIMER_TEXT = (
     "⚠️ **Disclaimer:** This tool drafts a starting point based only on what you provide. "
@@ -100,7 +103,14 @@ def get_llm(model_override=None):
 
 def render_debug_view():
     """Toont een verborgen debug-dashboard als de juiste URL-parameter is meegegeven."""
-    if st.query_params.get("debug") == DEBUG_SECRET_TOKEN:
+    # Fail closed: als het token niet geconfigureerd is in secrets, stop direct
+    if "DEBUG_TOKEN" not in st.secrets or not st.secrets["DEBUG_TOKEN"]:
+        return
+
+    configured_token = st.secrets["DEBUG_TOKEN"]
+
+    # Controleer of de URL parameter ?debug=... overeenkomt met het geconfigureerde token
+    if st.query_params.get("debug") == configured_token:
         st.title("🛠️ Developer Debug View - Extended Sessions Log")
         st.warning("Je bevindt je in de afgeschermde ontwikkelaarsomgeving.")
         
